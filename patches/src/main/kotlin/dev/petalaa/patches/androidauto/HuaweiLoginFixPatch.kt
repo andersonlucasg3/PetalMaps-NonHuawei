@@ -49,8 +49,8 @@ internal object D4AFingerprint : Fingerprint(
 )
 
 /**
- * Bytecode patch that makes [d4.a] pick the sign-in flow based on HMS Core
- * availability at runtime.
+ * Bytecode patch that forces [d4.a] to always return [b.n] (AccountPicker /
+ * ThirdPartyPhoneAccountHelper).
  *
  * ## Problem
  * [ManufacturerCheckBypassPatch] forces [up2.g] → true, which makes [d4.a]
@@ -60,10 +60,12 @@ internal object D4AFingerprint : Fingerprint(
  * nothing.
  *
  * ## Fix
- * Rewrite [d4.a] to check `HuaweiMobileServicesUtil.isHuaweiMobileServicesAvailable(Context)`:
- *   - HMS Core available → return [a.g] (native Huawei ID flow, previous behavior)
- *   - HMS Core missing   → return [b.n] (AccountPicker), which
- *     [AccountPickerH5Patch] redirects to `getSignInIntentByH5()` (WebView H5).
+ * Rewrite [d4.a] to unconditionally return [b.n]. That path reaches
+ * `AccountPickerSignInHubPresenter.checkMinVersion()`, which
+ * [AccountPickerH5Patch] already redirects to `getSignInIntentByH5()` (WebView
+ * H5 sign-in). This works without HMS Core and avoids any HMS IPC on the
+ * account factory (a runtime availability check here used to block sign-in when
+ * HMS Core was installed but not running).
  *
  * ## Compatibility
  * Coexists safely with [ManufacturerCheckBypassPatch]: only the account
@@ -75,8 +77,8 @@ internal object D4AFingerprint : Fingerprint(
 @Suppress("unused")
 val huaweiLoginFixPatch = bytecodePatch(
     name = "Huawei login fix",
-    description = "Routes sign-in to the Huawei ID flow when HMS Core is available and " +
-            "to the Account Picker WebView H5 fallback when it is missing.",
+    description = "Forces the Account Picker sign-in path (b.n) in AccountFactory, " +
+            "which uses the WebView H5 sign-in fallback when HMS Core is missing.",
     default = true,
 ) {
     compatibleWith(COMPATIBILITY_PETAL_MAPS)
@@ -90,19 +92,10 @@ val huaweiLoginFixPatch = bytecodePatch(
             method.removeInstructions(0, instructionCount)
         }
 
-        // Uses only v0, which fits the original 1-register method.
+        // Replace with: return b.n();  (uses only v0, fits original 1-register method)
         method.addInstructions(
             0,
             """
-                invoke-static {}, La81;->c()Landroid/content/Context;
-                move-result-object v0
-                invoke-static {v0}, Lcom/huawei/hms/api/HuaweiMobileServicesUtil;->isHuaweiMobileServicesAvailable(Landroid/content/Context;)I
-                move-result v0
-                if-eqz v0, :no_hms
-                invoke-static {}, Lcom/huawei/maps/businessbase/utils/account/a;->g()Lcom/huawei/maps/businessbase/utils/account/a;
-                move-result-object v0
-                return-object v0
-                :no_hms
                 invoke-static {}, Lcom/huawei/maps/businessbase/utils/account/b;->n()Lcom/huawei/maps/businessbase/utils/account/b;
                 move-result-object v0
                 return-object v0
